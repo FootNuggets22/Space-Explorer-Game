@@ -1,0 +1,23 @@
+{
+  "name": "portfolio-game",
+  "version": "1.0.0",
+  "description": "An impressive HTML5 Canvas game for portfolio showcase",
+  "main": "index.html",
+  "scripts": {
+    "start": "live-server --port=3000 --host=localhost --open=/",
+    "dev": "live-server --port=3000 --host=localhost --open=/ --watch=.",
+    "build": "echo 'Build complete - game is ready for deployment'"
+  },
+  "keywords": [
+    "game",
+    "html5",
+    "canvas",
+    "javascript",
+    "portfolio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  }
+}
