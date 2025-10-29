@@ -1,6 +1,6 @@
 // Player spaceship class
 class Player {
-    constructor(x, y) {
+    constructor(x, y, controls = 'WASD', playerNumber = 1) {
         this.position = new Vector2(x, y);
         this.velocity = new Vector2(0, 0);
         this.size = 12;
@@ -15,6 +15,13 @@ class Player {
         this.trailTimer = 0;
         this.shield = false;
         this.shieldTime = 0;
+        this.controls = controls; // 'WASD' or 'ARROWS'
+        this.playerNumber = playerNumber;
+        this.score = 0;
+        
+        // Different colors for different players
+        this.color = playerNumber === 1 ? '#45b7d1' : '#e17055';
+        this.trailColor = playerNumber === 1 ? '#4ecdc4' : '#fd79a8';
     }
 
     update(deltaTime, canvas, particleSystem, audioSystem) {
@@ -53,7 +60,7 @@ class Player {
             particleSystem.createTrail(
                 this.position.x - Math.cos(this.rotation) * this.size,
                 this.position.y - Math.sin(this.rotation) * this.size,
-                this.shield ? '#ffeaa7' : '#4ecdc4'
+                this.shield ? '#ffeaa7' : this.trailColor
             );
             this.trailTimer = 0;
         }
@@ -67,18 +74,33 @@ class Player {
     handleInput(audioSystem) {
         const keys = game.input.keys;
         
-        // Movement
-        if (keys['KeyW'] || keys['ArrowUp']) {
-            this.velocity.y -= this.acceleration;
-        }
-        if (keys['KeyS'] || keys['ArrowDown']) {
-            this.velocity.y += this.acceleration;
-        }
-        if (keys['KeyA'] || keys['ArrowLeft']) {
-            this.velocity.x -= this.acceleration;
-        }
-        if (keys['KeyD'] || keys['ArrowRight']) {
-            this.velocity.x += this.acceleration;
+        // Movement based on control scheme
+        if (this.controls === 'WASD') {
+            if (keys['KeyW']) {
+                this.velocity.y -= this.acceleration;
+            }
+            if (keys['KeyS']) {
+                this.velocity.y += this.acceleration;
+            }
+            if (keys['KeyA']) {
+                this.velocity.x -= this.acceleration;
+            }
+            if (keys['KeyD']) {
+                this.velocity.x += this.acceleration;
+            }
+        } else if (this.controls === 'ARROWS') {
+            if (keys['ArrowUp']) {
+                this.velocity.y -= this.acceleration;
+            }
+            if (keys['ArrowDown']) {
+                this.velocity.y += this.acceleration;
+            }
+            if (keys['ArrowLeft']) {
+                this.velocity.x -= this.acceleration;
+            }
+            if (keys['ArrowRight']) {
+                this.velocity.x += this.acceleration;
+            }
         }
         
         // Limit speed
@@ -150,7 +172,7 @@ class Player {
         }
         
         // Draw spaceship
-        ctx.fillStyle = '#45b7d1';
+        ctx.fillStyle = this.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2;
         

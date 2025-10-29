@@ -68,7 +68,13 @@ class PowerUp {
         
         switch(this.type) {
             case 'health':
-                player.heal();
+                if (game.gameMode === 'coop') {
+                    // In co-op mode, restore shared lives
+                    game.sharedLives = Math.min(game.sharedLives + 1, 5);
+                } else {
+                    // In single/vs mode, heal individual player
+                    player.heal();
+                }
                 break;
             case 'shield':
                 player.activateShield();

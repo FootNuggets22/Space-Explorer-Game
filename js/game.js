@@ -7,14 +7,19 @@ class Game {
         this.height = canvas.height;
         
         // Game state
-        this.state = 'menu'; // 'menu', 'playing', 'gameOver'
+        this.state = 'menu'; // 'menu', 'playerCount', 'modeSelection', 'playing', 'gameOver', 'winner'
+        this.gameMode = 'single'; // 'single', 'vs', 'coop'
+        this.playerCount = 1; // 1 or 2
         this.score = 0;
-        this.highScore = this.loadHighScore();
+        this.highScore = 0; // Will be loaded when mode is selected
         this.level = 1;
         this.lastTime = 0;
+        this.sharedLives = 5; // For co-op mode
         
-        // Game objects
-        this.player = new Player(this.width / 2, this.height - 100);
+        // Game objects - will be initialized based on game mode
+        this.player1 = null;
+        this.player2 = null;
+        this.players = [];
         this.asteroids = [];
         this.powerUps = [];
         this.particleSystem = new ParticleSystem();
@@ -114,26 +119,65 @@ class Game {
             this.difficultyTimer = 0;
         }
 
-        // Update player
-        this.player.update(deltaTime, this.canvas, this.particleSystem, this.audioSystem);
+        // Update players
+        this.players.forEach(player => {
+            player.update(deltaTime, this.canvas, this.particleSystem, this.audioSystem);
+        });
 
         // Update asteroids
         for (let i = this.asteroids.length - 1; i >= 0; i--) {
             const asteroid = this.asteroids[i];
             asteroid.update(deltaTime, this.canvas);
 
-            // Check collision with player
-            if (asteroid.checkCollision(this.player)) {
-                // Player takes damage
-                if (this.player.takeDamage(this.particleSystem)) {
-                    this.audioSystem.play('gameOver');
-                    this.gameOver();
-                    return;
-                } else {
-                    this.audioSystem.play('damage');
+            // Check collision with both players
+            let asteroidHit = false;
+            for (let j = 0; j < this.players.length; j++) {
+                const player = this.players[j];
+                if (asteroid.checkCollision(player)) {
+                    // Handle damage based on game mode
+                    if (this.gameMode === 'coop') {
+                        // In co-op mode, reduce shared lives
+                        if (!player.invulnerable && !player.shield) {
+                            this.sharedLives--;
+                            player.invulnerable = true;
+                            player.invulnerabilityTime = 1.5;
+                            
+                            // Create damage effect
+                            this.particleSystem.createExplosion(player.position.x, player.position.y, 15, '#ff6b6b');
+                            
+                            if (this.sharedLives <= 0) {
+                                this.audioSystem.play('gameOver');
+                                this.gameOver();
+                                return;
+                            } else {
+                                this.audioSystem.play('damage');
+                            }
+                        }
+                    } else {
+                        // In single/vs mode, player takes individual damage
+                        if (player.takeDamage(this.particleSystem)) {
+                            if (this.gameMode === 'single') {
+                                this.audioSystem.play('gameOver');
+                                this.gameOver();
+                                return;
+                            } else if (this.gameMode === 'vs') {
+                                // Check for winner in VS mode
+                                const winner = player === this.player1 ? this.player2 : this.player1;
+                                this.audioSystem.play('gameOver');
+                                this.showWinner(winner);
+                                return;
+                            }
+                        } else {
+                            this.audioSystem.play('damage');
+                        }
+                    }
+                    asteroidHit = true;
+                    break; // One collision per asteroid
                 }
+            }
 
-                // Always remove/split the asteroid that hit the player
+            // Remove/split asteroid if it was hit
+            if (asteroidHit) {
                 this.audioSystem.play('asteroid');
                 asteroid.split(this.asteroids, this.particleSystem);
                 this.asteroids.splice(i, 1);
@@ -149,10 +193,19 @@ class Game {
                 continue;
             }
 
-            // Check collision with player
-            if (powerUp.checkCollision(this.player)) {
-                this.audioSystem.play('powerup');
-                powerUp.applyEffect(this.player, this, this.particleSystem);
+            // Check collision with both players
+            let powerUpCollected = false;
+            for (let j = 0; j < this.players.length; j++) {
+                const player = this.players[j];
+                if (powerUp.checkCollision(player)) {
+                    this.audioSystem.play('powerup');
+                    powerUp.applyEffect(player, this, this.particleSystem);
+                    powerUpCollected = true;
+                    break; // One collection per power-up
+                }
+            }
+
+            if (powerUpCollected) {
                 this.powerUps.splice(i, 1);
             }
         }
@@ -182,8 +235,8 @@ class Game {
             // Render power-ups
             this.powerUps.forEach(powerUp => powerUp.render(this.ctx));
 
-            // Render player
-            this.player.render(this.ctx);
+            // Render players
+            this.players.forEach(player => player.render(this.ctx));
 
             // Update UI
             this.updateUI();
@@ -192,16 +245,47 @@ class Game {
 
     updateUI() {
         document.getElementById('scoreValue').textContent = this.score;
-        document.getElementById('livesValue').textContent = this.player.health;
+        
+        if (this.gameMode === 'single') {
+            document.getElementById('livesValue').textContent = this.player1.health;
+        } else if (this.gameMode === 'vs') {
+            document.getElementById('livesValue').textContent = `P1: ${this.player1.health} | P2: ${this.player2.health}`;
+        } else if (this.gameMode === 'coop') {
+            document.getElementById('livesValue').textContent = `Team Lives: ${this.sharedLives}`;
+        }
+        
         document.getElementById('levelValue').textContent = this.level;
         document.getElementById('highScoreValue').textContent = this.highScore;
     }
 
-    startGame() {
+    startGame(mode = 'single') {
+        this.startGameWithControls(mode, 'WASD');
+    }
+
+    startGameWithControls(mode = 'single', controls = 'WASD') {
         this.state = 'playing';
+        this.gameMode = mode;
         this.score = 0;
         this.level = 1;
-        this.player = new Player(this.width / 2, this.height - 100);
+        this.sharedLives = 5; // Reset shared lives for co-op mode
+        
+        // Load high score for this specific mode
+        this.highScore = this.getCurrentModeHighScore();
+        
+        // Initialize players based on game mode
+        if (mode === 'single') {
+            this.player1 = new Player(this.width / 2, this.height - 100, controls, 1);
+            this.players = [this.player1];
+        } else if (mode === 'vs') {
+            this.player1 = new Player(this.width / 3, this.height - 100, 'WASD', 1);
+            this.player2 = new Player((this.width * 2) / 3, this.height - 100, 'ARROWS', 2);
+            this.players = [this.player1, this.player2];
+        } else if (mode === 'coop') {
+            this.player1 = new Player(this.width / 3, this.height - 100, 'WASD', 1);
+            this.player2 = new Player((this.width * 2) / 3, this.height - 100, 'ARROWS', 2);
+            this.players = [this.player1, this.player2];
+        }
+        
         this.asteroids = [];
         this.powerUps = [];
         this.particleSystem.clear();
@@ -215,9 +299,115 @@ class Game {
         
         this.initializeGame();
         
-        // Hide start screen
+        // Hide all screens and show game
         document.getElementById('startScreen').classList.add('hidden');
+        document.getElementById('playerCountScreen').classList.add('hidden');
+        document.getElementById('playerSelectionScreen').classList.add('hidden');
         document.getElementById('gameOverScreen').classList.add('hidden');
+        document.getElementById('winnerScreen').classList.add('hidden');
+    }
+
+    showPlayerCount() {
+        this.state = 'playerCount';
+        document.getElementById('startScreen').classList.add('hidden');
+        document.getElementById('playerSelectionScreen').classList.add('hidden');
+        document.getElementById('gameOverScreen').classList.add('hidden');
+        document.getElementById('winnerScreen').classList.add('hidden');
+        document.getElementById('playerCountScreen').classList.remove('hidden');
+    }
+
+    showModeSelection(playerCount) {
+        this.state = 'modeSelection';
+        this.playerCount = playerCount;
+        
+        // Hide all other screens
+        document.getElementById('startScreen').classList.add('hidden');
+        document.getElementById('playerCountScreen').classList.add('hidden');
+        document.getElementById('gameOverScreen').classList.add('hidden');
+        document.getElementById('winnerScreen').classList.add('hidden');
+        
+        // Populate mode selection based on player count
+        this.populateModeSelection(playerCount);
+        
+        document.getElementById('playerSelectionScreen').classList.remove('hidden');
+    }
+
+    populateModeSelection(playerCount) {
+        const modeButtons = document.getElementById('modeButtons');
+        const title = document.getElementById('modeSelectionTitle');
+        const desc = document.getElementById('modeSelectionDesc');
+        
+        if (playerCount === 1) {
+            title.textContent = 'Single Player Mode';
+            desc.textContent = 'Choose your control scheme';
+            
+            // Get high score for single player mode
+            const singleHighScore = this.getHighScoreForMode('single');
+            
+            modeButtons.innerHTML = `
+                <button id="singlePlayerBtn" class="mode-btn">
+                    <div class="mode-icon">⌨️</div>
+                    <div class="mode-title">WASD Controls</div>
+                    <div class="mode-desc">Use W/A/S/D keys to move<br/>3 Lives<br/><span class="high-score-text">High Score: ${singleHighScore}</span></div>
+                </button>
+                <button id="singleArrowBtn" class="mode-btn">
+                    <div class="mode-icon">🔼</div>
+                    <div class="mode-title">Arrow Controls</div>
+                    <div class="mode-desc">Use Arrow keys to move<br/>3 Lives<br/><span class="high-score-text">High Score: ${singleHighScore}</span></div>
+                </button>
+            `;
+        } else {
+            title.textContent = 'Two Player Mode';
+            desc.textContent = 'Choose your game style';
+            
+            // Get high scores for multiplayer modes
+            const vsHighScore = this.getHighScoreForMode('vs');
+            const coopHighScore = this.getHighScoreForMode('coop');
+            
+            modeButtons.innerHTML = `
+                <button id="vsPlayerBtn" class="mode-btn">
+                    <div class="mode-icon">⚔️</div>
+                    <div class="mode-title">VS Mode</div>
+                    <div class="mode-desc">P1: WASD, P2: Arrow keys<br/>3 Lives each - Last player standing wins!<br/><span class="high-score-text">High Score: ${vsHighScore}</span></div>
+                </button>
+                <button id="coopPlayerBtn" class="mode-btn">
+                    <div class="mode-icon">🤝</div>
+                    <div class="mode-title">Co-op Mode</div>
+                    <div class="mode-desc">P1: WASD, P2: Arrow keys<br/>5 Shared Lives - Work together!<br/><span class="high-score-text">High Score: ${coopHighScore}</span></div>
+                </button>
+            `;
+        }
+    }
+
+    getHighScoreForMode(mode) {
+        const baseKey = 'spaceExplorerHighScore';
+        const key = `${baseKey}_${mode}`;
+        const saved = localStorage.getItem(key);
+        return saved ? parseInt(saved) : 0;
+    }
+
+    showWinner(winnerPlayer) {
+        this.state = 'winner';
+        
+        // Stop background music
+        this.audioSystem.stopBackgroundMusic();
+        
+        // Check and save high score
+        this.saveHighScore();
+        
+        // Show winner screen
+        const playerName = winnerPlayer === this.player1 ? 'Player 1' : 'Player 2';
+        document.getElementById('winnerTitle').textContent = `${playerName} Wins!`;
+        document.getElementById('winnerFinalScore').textContent = this.score;
+        document.getElementById('winnerHighScore').textContent = this.highScore;
+        
+        document.getElementById('winnerScreen').classList.remove('hidden');
+        
+        // Create celebration effects
+        this.particleSystem.createExplosion(winnerPlayer.position.x, winnerPlayer.position.y, 50, '#ffd700');
+        
+        // Play winner sound (you could add a specific winner sound effect)
+        setTimeout(() => this.audioSystem.play('levelUp'), 500);
     }
 
     gameOver() {
@@ -246,23 +436,62 @@ class Game {
         
         document.getElementById('gameOverScreen').classList.remove('hidden');
         
-        // Create final explosion
-        this.particleSystem.createExplosion(this.player.position.x, this.player.position.y, 30, '#ff6b6b');
+        // Create final explosion for both players
+        this.players.forEach(player => {
+            if (player.health <= 0) {
+                this.particleSystem.createExplosion(player.position.x, player.position.y, 30, '#ff6b6b');
+            }
+        });
     }
 
     restart() {
-        this.startGame();
+        this.showPlayerCount();
+    }
+
+    showPlayerSelection() {
+        this.showPlayerCount();
+    }
+
+    showMainMenu() {
+        this.state = 'menu';
+        document.getElementById('startScreen').classList.remove('hidden');
+        document.getElementById('playerCountScreen').classList.add('hidden');
+        document.getElementById('playerSelectionScreen').classList.add('hidden');
+        document.getElementById('gameOverScreen').classList.add('hidden');
+        document.getElementById('winnerScreen').classList.add('hidden');
     }
 
     loadHighScore() {
-        const saved = localStorage.getItem('spaceExplorerHighScore');
+        const key = this.getHighScoreKey();
+        const saved = localStorage.getItem(key);
         return saved ? parseInt(saved) : 0;
     }
 
     saveHighScore() {
         if (this.score > this.highScore) {
             this.highScore = this.score;
-            localStorage.setItem('spaceExplorerHighScore', this.highScore.toString());
+            const key = this.getHighScoreKey();
+            localStorage.setItem(key, this.highScore.toString());
         }
+    }
+
+    getHighScoreKey() {
+        const baseKey = 'spaceExplorerHighScore';
+        switch(this.gameMode) {
+            case 'single':
+                return `${baseKey}_single`;
+            case 'vs':
+                return `${baseKey}_vs`;
+            case 'coop':
+                return `${baseKey}_coop`;
+            default:
+                return baseKey;
+        }
+    }
+
+    getCurrentModeHighScore() {
+        const key = this.getHighScoreKey();
+        const saved = localStorage.getItem(key);
+        return saved ? parseInt(saved) : 0;
     }
 }
